@@ -20,11 +20,12 @@ contains
 subroutine find_obsolete_params(param_file)
   type(param_file_type), intent(in) :: param_file !< Structure containing parameter file data.
   ! Local variables
-  character(len=40)  :: mod = "find_obsolete_params" ! This module's name.
+  character(len=40)  :: mdl = "find_obsolete_params" ! This module's name.
 ! This include declares and sets the variable "version".
 #include "version_variable.h"
-  integer :: test_int
+  integer :: test_int, l_seg, nseg
   logical :: test_logic, test_logic2, test_logic3, split
+  character(len=40)  :: temp_string
 
   if (.not.is_root_pe()) return
 
@@ -58,6 +59,23 @@ subroutine find_obsolete_params(param_file)
        hint="Instead use OBC_NUMBER_SEGMENTS>0 and use the new segments protocol.")
   call obsolete_logical(param_file, "APPLY_OBC_U_FLATHER_WEST", &
        hint="Instead use OBC_NUMBER_SEGMENTS>0 and use the new segments protocol.")
+  call obsolete_char(param_file, "OBC_CONFIG", &
+       hint="Instead use OBC_USER_CONFIG and use the new segments protocol.")
+  call obsolete_char(param_file, "READ_OBC_ETA", &
+       hint="Instead use OBC_SEGMENT_XXX_DATA.")
+  call obsolete_char(param_file, "READ_OBC_UV", &
+       hint="Instead use OBC_SEGMENT_XXX_DATA.")
+  call obsolete_char(param_file, "READ_OBC_TS", &
+       hint="Instead use OBC_SEGMENT_XXX_DATA.")
+  call obsolete_char(param_file, "EXTEND_OBC_SEGMENTS", &
+       hint="This option is no longer needed, nor supported.")
+  nseg = 0
+  call read_param(param_file, "OBC_NUMBER_OF_SEGMENTS", nseg)
+  do l_seg = 1,nseg
+    write(temp_string(1:22),"('OBC_SEGMENT_',i3.3,'_TNUDGE')") l_seg
+    call obsolete_real(param_file, temp_string, &
+         hint="Instead use OBC_SEGMENT_xxx_VELOCITY_NUDGING_TIMESCALES.")
+  enddo
 
   test_logic3 = .true. ; call read_param(param_file,"ENABLE_THERMODYNAMICS",test_logic3)
   test_logic = .true. ; call read_param(param_file,"TEMPERATURE",test_logic)
@@ -70,7 +88,7 @@ subroutine find_obsolete_params(param_file)
     call MOM_ERROR(FATAL, "find_obsolete_params: "// &
          "TEMPERATURE is an obsolete run-time flag.  Use ENABLE_THERMODYNAMICS instead.")
   endif ; endif
-  
+
   test_logic = test_logic3 ; call read_param(param_file,"NONLINEAR_EOS",test_logic)
   if (test_logic .neqv. test_logic3) then
     call MOM_error(WARNING, "find_obsolete_params: "// &
@@ -104,6 +122,8 @@ subroutine find_obsolete_params(param_file)
 
   call obsolete_real(param_file, "BT_COR_SLOW_RATE", 0.0)
   call obsolete_real(param_file, "BT_COR_FRAC", 1.0)
+
+  call obsolete_logical(param_file, "MASK_MASSLESS_TRACERS", .false.)
 
   call obsolete_logical(param_file, "BT_INCLUDE_UDHDT", .false.)
 
@@ -169,18 +189,20 @@ subroutine find_obsolete_params(param_file)
     "find_obsolete_params: #define DYNAMIC_SURFACE_PRESSURE is not yet "//&
     "implemented without #define SPLIT.")
 
-  call read_param(param_file,"USE_LEGACY_SPLIT",test_logic)
-  if (.not.(split .and. test_logic)) then
-    call obsolete_logical(param_file, "FLUX_BT_COUPLING", .false.)
-    call obsolete_logical(param_file, "READJUST_BT_TRANS", .false.)
-    call obsolete_logical(param_file, "RESCALE_BE_FACE_AREAS", .false.)
-    call obsolete_logical(param_file, "APPLY_BT_DRAG", .true.)
-  endif
+  call obsolete_logical(param_file, "USE_LEGACY_SPLIT", .false.)
+
+  call obsolete_logical(param_file, "FLUX_BT_COUPLING", .false.)
+  call obsolete_logical(param_file, "READJUST_BT_TRANS", .false.)
+  call obsolete_logical(param_file, "RESCALE_BT_FACE_AREAS", .false.)
+  call obsolete_logical(param_file, "APPLY_BT_DRAG", .true.)
+  call obsolete_real(param_file, "BT_MASS_SOURCE_LIMIT", 0.0)
 
   call obsolete_int(param_file, "SEAMOUNT_LENGTH_SCALE", hint="Use SEAMOUNT_X_LENGTH_SCALE instead.")
 
+  call obsolete_logical(param_file, "MSTAR_FIXED", hint="Instead use MSTAR_MODE.")
+
   ! Write the file version number to the model log.
-  call log_version(param_file, mod, version)
+  call log_version(param_file, mdl, version)
 
 end subroutine find_obsolete_params
 
@@ -224,7 +246,7 @@ subroutine obsolete_logical(param_file, varname, warning_val, hint)
            " is an obsolete run-time flag. "//trim(hint_msg))
     endif
   endif
-  
+
 end subroutine obsolete_logical
 
 !> Test for presence of obsolete STRING in parameter file.
@@ -234,10 +256,10 @@ subroutine obsolete_char(param_file, varname, hint)
   character(len=*), optional, intent(in) :: hint  !< A hint to the user about what to do.
   ! Local variables
   character(len=200) :: test_string, hint_msg
-  
+
   test_string = ''; call read_param(param_file, varname, test_string)
   hint_msg = " " ; if (present(hint)) hint_msg = hint
-  
+
   if (len_trim(test_string) > 0) call MOM_ERROR(FATAL,                 &
            "MOM_obsolete_params: "//trim(varname)//                    &
            " is an obsolete run-time flag, and should not be used. "// &
@@ -254,11 +276,11 @@ subroutine obsolete_real(param_file, varname, warning_val, hint)
   ! Local variables
   real :: test_val, warn_val
   character(len=128) :: hint_msg
-  
+
   test_val = -9e35; call read_param(param_file, varname, test_val)
   warn_val = -9e35; if (present(warning_val)) warn_val = warning_val
   hint_msg = " " ; if (present(hint)) hint_msg = hint
-  
+
   if (test_val /= -9e35) then
     if (test_val == warn_val) then
       call MOM_ERROR(WARNING, "MOM_obsolete_params: "//trim(varname)// &
@@ -280,11 +302,11 @@ subroutine obsolete_int(param_file, varname, warning_val, hint)
   ! Local variables
   integer :: test_val, warn_val
   character(len=128) :: hint_msg
-  
+
   test_val = -123456788; call read_param(param_file, varname, test_val)
   warn_val = -123456788; if (present(warning_val)) warn_val = warning_val
   hint_msg = " " ; if (present(hint)) hint_msg = hint
-  
+
   if (test_val /= -123456788) then
     if (test_val == warn_val) then
       call MOM_ERROR(WARNING, "MOM_obsolete_params: "//trim(varname)// &
